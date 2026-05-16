@@ -313,6 +313,8 @@ async function resolveMarkdownToZhihuHtml(
     html += `<p>${escapeHtml(`[图片待补充：${block.originalUrl}]`)}</p>`;
   }
 
+  html = cleanupZhihuHtml(html);
+
   const uniqueFailedImages = Array.from(new Set(failedImages));
   const filteredWarnings = warnings.filter((warning, index) => {
     const duplicateIndex = warnings.findIndex((candidate) => candidate.code === warning.code && candidate.message === warning.message);
@@ -488,6 +490,18 @@ function escapeHtml(value: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+export function cleanupZhihuHtml(html: string): string {
+  return html
+    .replace(/<figcaption[^>]*>添加图片注释，不超过 140 字（可选）<\/figcaption>/g, '')
+    .replace(/<figcaption[^>]*>\s*<\/figcaption>/g, '')
+    .replace(/(?:<p>\s*<\/p>|<p><br\s*\/?><\/p>|\s*<br\s*\/?>\s*)+(?=<figure)/g, '')
+    .replace(/<\/figure>(?:<p>\s*<\/p>|<p><br\s*\/?><\/p>|\s*<br\s*\/?>\s*)+/g, '</figure>')
+    .replace(/<\/figure>\s*(?=<p>)/g, '</figure>')
+    .replace(/(?<=<\/p>)\s*(?=<figure>)/g, '')
+    .replace(/<\/figure><figure/g, '</figure><p><br></p><figure')
+    .trim();
 }
 
 async function waitForEditorReady(page: Page, timeoutMs: number): Promise<boolean> {

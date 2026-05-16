@@ -16,6 +16,7 @@
   "dependencies": {
     "electron": "^42.1.0",
     "playwright": "^1.55.0",
+    "rehype-parse": "^9.0.1",
     "rehype-stringify": "^10.0.1",
     "remark-gfm": "^4.0.1",
     "remark-rehype": "^11.1.2",
