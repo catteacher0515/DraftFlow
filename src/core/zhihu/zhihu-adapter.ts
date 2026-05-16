@@ -357,7 +357,14 @@ async function uploadImageAndGetHtml(page: Page, absolutePath: string): Promise<
     throw new Error('Zhihu image upload did not produce a figure block');
   }
 
-  return html;
+  const srcMatch = html.match(/<img[^>]+src="([^"]+)"/i);
+  const originalSrcMatch = html.match(/data-original-src="([^"]+)"/i);
+  const imageSrc = originalSrcMatch?.[1] ?? srcMatch?.[1];
+  if (!imageSrc) {
+    throw new Error('Zhihu image upload produced no image src');
+  }
+
+  return `<p><img src="${escapeHtmlAttribute(imageSrc)}" alt=""></p>`;
 }
 
 async function uploadImageIntoEditor(page: Page, absolutePath: string): Promise<void> {
@@ -490,6 +497,14 @@ function escapeHtml(value: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+function escapeHtmlAttribute(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 export function cleanupZhihuHtml(html: string): string {

@@ -19,4 +19,12 @@ describe('zhihu adapter html cleanup', () => {
     expect(cleaned).not.toContain('<p><br></p><figure');
     expect(cleaned).not.toContain('</figure><p><br></p>');
   });
+
+  it('keeps lightweight paragraph images untouched', () => {
+    const html = '<p>图片前</p><p><img src="https://pic-private.zhihu.com/demo.png" alt=""></p><p>图片后</p>';
+
+    const cleaned = cleanupZhihuHtml(html);
+
+    expect(cleaned).toBe(html);
+  });
 });

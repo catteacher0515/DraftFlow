@@ -28,8 +28,11 @@ describe('html renderer', () => {
     expect(html).toContain('<em>斜体</em>');
     expect(html).toContain('<blockquote class="blockquote">');
     expect(html).toContain('<p>• 列表一<br>• 列表二</p>');
-    expect(html).toContain('<pre data-language="TypeScript"><code class="language-typescript">const a = 1;');
-    expect(html).toContain('<p><strong>A｜B</strong><br>1｜2</p>');
+    expect(html).toContain('<p><strong>TypeScript</strong></p>');
+    expect(html).toContain('<pre><code>const a = 1;</code></pre>');
+    expect(html).toContain('<pre><code>+---+---+');
+    expect(html).toContain('| A | B |');
+    expect(html).toContain('| 1 | 2 |');
   });
 
   it('normalizes compact lists and divider output for zhihu html', async () => {
@@ -45,7 +48,7 @@ describe('html renderer', () => {
 
     expect(html).toContain('<p>1. 第一步<br>2. 第二步</p>');
     expect(html).toContain('<p>[x] 已完成事项<br>[ ] 未完成事项</p>');
-    expect(html).toContain('<p>---</p>');
+    expect(html).toContain('<p>──────────</p>');
     expect(html).not.toContain('<input');
     expect(html).not.toContain('<hr');
     expect(html).not.toContain('<ul');
