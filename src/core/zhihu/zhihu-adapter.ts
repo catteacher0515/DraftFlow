@@ -24,8 +24,10 @@ export interface ZhihuAdapter {
 const ZHIHU_CREATOR_URL = 'https://www.zhihu.com/creator';
 const ZHIHU_WRITE_URL = 'https://zhuanlan.zhihu.com/write';
 const ZHIHU_SIGNIN_URL = 'https://www.zhihu.com/signin?next=https%3A%2F%2Fzhuanlan.zhihu.com%2Fwrite';
+const ZHIHU_MAIN_EDITOR_SELECTOR = '.public-DraftEditor-content[contenteditable="true"]';
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
 const LOGIN_POLL_INTERVAL_MS = 1_000;
+const NAVIGATION_TIMEOUT_MS = 15_000;
 
 export async function createZhihuAdapter(rootDir: string): Promise<ZhihuAdapter> {
   const sessionStore = createSessionStore(rootDir, 'zhihu');
@@ -37,12 +39,12 @@ export async function createZhihuAdapter(rootDir: string): Promise<ZhihuAdapter>
   return {
     async ensureAuthenticated() {
       logZhihu('checking authentication');
-      await page.goto(ZHIHU_CREATOR_URL, { waitUntil: 'domcontentloaded' });
+      await navigateForAuth(page);
       let authenticated = await isAuthenticated(page);
 
       if (!authenticated) {
         logZhihu('login required, opening login page');
-        await page.goto(ZHIHU_SIGNIN_URL, { waitUntil: 'domcontentloaded' });
+        await safeGoto(page, ZHIHU_SIGNIN_URL);
         await page.bringToFront();
 
         const loggedIn = await waitForAuthentication(context, LOGIN_TIMEOUT_MS);
@@ -63,15 +65,19 @@ export async function createZhihuAdapter(rootDir: string): Promise<ZhihuAdapter>
       logZhihu('authentication ready');
     },
     async createDraft(payload) {
-      logZhihu(`creating draft via editor automation: ${payload.title}`);
+      logZhihu(`creating draft via api automation: ${payload.title}`);
       page = await openEditor(page);
-      await fillTitle(page, payload.title);
-      const imageResult = await fillMarkdownWithImages(page, payload.mark_content, payload.localImageMap ?? {});
-      const draft = await waitForDraftReady(page);
+
+      const imageResult = await resolveMarkdownToZhihuHtml(page, payload.mark_content, payload.localImageMap ?? {});
+      const draft = await saveDraftViaApi(page, payload.title, imageResult.html);
       logZhihu(`draft created: ${draft.draftId}`);
+
       return {
-        ...draft,
-        ...imageResult
+        draftId: draft.draftId,
+        draftUrl: draft.draftUrl,
+        uploadedImages: imageResult.uploadedImages,
+        failedImages: imageResult.failedImages,
+        warnings: imageResult.warnings
       };
     },
     async close() {
@@ -84,6 +90,10 @@ interface LaunchAttempt {
   label: string;
   options: Parameters<typeof chromium.launchPersistentContext>[1];
 }
+
+type MarkdownBlock =
+  | { type: 'text'; value: string }
+  | { type: 'image'; originalUrl: string };
 
 async function launchBrowserContext(userDataDir: string): Promise<BrowserContext> {
   const attempts = await buildLaunchAttempts();
@@ -170,6 +180,22 @@ async function ensurePage(context: BrowserContext): Promise<Page> {
   return context.newPage();
 }
 
+async function navigateForAuth(page: Page): Promise<void> {
+  try {
+    await safeGoto(page, ZHIHU_CREATOR_URL);
+  } catch (error) {
+    logZhihu(`creator page navigation failed, fallback to write page: ${toErrorMessage(error)}`);
+    await safeGoto(page, ZHIHU_WRITE_URL);
+  }
+}
+
+async function safeGoto(page: Page, url: string): Promise<void> {
+  await page.goto(url, {
+    waitUntil: 'domcontentloaded',
+    timeout: NAVIGATION_TIMEOUT_MS
+  });
+}
+
 async function isAuthenticated(page: Page): Promise<boolean> {
   const url = page.url();
   if (url.includes('/signin')) {
@@ -223,7 +249,7 @@ async function waitForAuthentication(context: BrowserContext, timeoutMs: number)
 async function openEditor(page: Page): Promise<Page> {
   const editorPage = await page.context().newPage();
   await editorPage.bringToFront().catch(() => undefined);
-  await editorPage.goto(ZHIHU_WRITE_URL, { waitUntil: 'domcontentloaded' });
+  await safeGoto(editorPage, ZHIHU_WRITE_URL);
   await editorPage.waitForLoadState('networkidle').catch(() => undefined);
   const ready = await waitForEditorReady(editorPage, 30_000);
   if (!ready) {
@@ -233,75 +259,83 @@ async function openEditor(page: Page): Promise<Page> {
   return editorPage;
 }
 
-async function fillTitle(page: Page, title: string): Promise<void> {
-  const filled = await page.evaluate((value) => {
-    const candidates = [
-      ...Array.from(document.querySelectorAll('textarea[placeholder="请输入标题（最多 100 个字）"]')),
-      ...Array.from(document.querySelectorAll('textarea[placeholder="标题"]')),
-      ...Array.from(document.querySelectorAll('input[placeholder*="标题"]')),
-      ...Array.from(document.querySelectorAll('textarea[placeholder*="标题"]'))
-    ] as Array<HTMLInputElement | HTMLTextAreaElement>;
-
-    const titleNode = candidates.find((node) => {
-      const placeholder = node.getAttribute('placeholder') ?? '';
-      return placeholder.includes('标题');
-    });
-
-    if (!titleNode) {
-      return false;
-    }
-
-    titleNode.focus();
-    const prototype = titleNode instanceof HTMLTextAreaElement
-      ? HTMLTextAreaElement.prototype
-      : HTMLInputElement.prototype;
-    const descriptor = Object.getOwnPropertyDescriptor(prototype, 'value');
-    descriptor?.set?.call(titleNode, value);
-    titleNode.dispatchEvent(new Event('input', { bubbles: true }));
-    titleNode.dispatchEvent(new Event('change', { bubbles: true }));
-    titleNode.blur();
-    return true;
-  }, title);
-
-  if (!filled) {
-    throw new Error(`Zhihu title input not found. ${await collectEditorDiagnostics(page)}`);
-  }
-}
-
-async function fillMarkdown(page: Page, markdown: string): Promise<void> {
-  const editor = page.locator('[contenteditable="true"]').first();
-  if (!(await editor.count())) {
-    throw new Error(`Zhihu editor body not found. ${await collectEditorDiagnostics(page)}`);
-  }
-
-  await editor.click({ timeout: 10_000 });
-  await page.keyboard.press(`${process.platform === 'darwin' ? 'Meta' : 'Control'}+A`);
-  await page.keyboard.press('Backspace');
-  const html = await renderMarkdownToHtml(markdown);
-  await insertHtmlIntoEditor(page, html);
-  await page.waitForTimeout(1_500);
-}
-
-async function fillMarkdownWithImages(
+async function resolveMarkdownToZhihuHtml(
   page: Page,
   markdown: string,
   localImageMap: Record<string, string>
 ): Promise<{
+  html: string;
   uploadedImages: string[];
   failedImages: string[];
   warnings: Array<{ code: string; message: string }>;
 }> {
-  const imageEntries = Object.entries(localImageMap);
-  if (imageEntries.length === 0) {
-    await fillMarkdown(page, markdown);
-    return {
-      uploadedImages: [],
-      failedImages: [],
-      warnings: []
-    };
+  const uploadedImages: string[] = [];
+  const failedImages: string[] = [];
+  const warnings: Array<{ code: string; message: string }> = [];
+  const localImageHtmlMap = new Map<string, string>();
+
+  for (const [originalUrl, absolutePath] of Object.entries(localImageMap)) {
+    try {
+      const imageHtml = await uploadImageAndGetHtml(page, absolutePath);
+      localImageHtmlMap.set(originalUrl, imageHtml);
+      uploadedImages.push(originalUrl);
+    } catch (error) {
+      failedImages.push(originalUrl);
+      warnings.push({
+        code: 'LOCAL_IMAGE_UPLOAD_FAILED',
+        message: `${originalUrl}: ${toErrorMessage(error)}`
+      });
+    }
   }
 
-  const editor = page.locator('[contenteditable="true"]').first();
+  let html = '';
+  const blocks = splitMarkdownIntoBlocks(markdown);
+
+  for (const block of blocks) {
+    if (block.type === 'text') {
+      if (block.value.trim()) {
+        html += await renderMarkdownToHtml(block.value);
+      }
+      continue;
+    }
+
+    const localImageHtml = localImageHtmlMap.get(block.originalUrl);
+    if (localImageHtml) {
+      html += localImageHtml;
+      continue;
+    }
+
+    failedImages.push(block.originalUrl);
+    warnings.push({
+      code: 'PLATFORM_IMAGE_UPLOAD_UNAVAILABLE',
+      message: `${block.originalUrl}: current platform sync will keep text draft first and mark this image for manual completion`
+    });
+    html += `<p>${escapeHtml(`[图片待补充：${block.originalUrl}]`)}</p>`;
+  }
+
+  const uniqueFailedImages = Array.from(new Set(failedImages));
+  const filteredWarnings = warnings.filter((warning, index) => {
+    const duplicateIndex = warnings.findIndex((candidate) => candidate.code === warning.code && candidate.message === warning.message);
+    return duplicateIndex === index;
+  });
+
+  if (uniqueFailedImages.length > 0) {
+    filteredWarnings.push({
+      code: 'IMAGE_DEGRADED_TO_TEXT',
+      message: `图片未完全同步，已保留原文占位并记录失败清单：${uniqueFailedImages.join(', ')}`
+    });
+  }
+
+  return {
+    html,
+    uploadedImages,
+    failedImages: uniqueFailedImages,
+    warnings: filteredWarnings
+  };
+}
+
+async function uploadImageAndGetHtml(page: Page, absolutePath: string): Promise<string> {
+  const editor = page.locator(ZHIHU_MAIN_EDITOR_SELECTOR).first();
   if (!(await editor.count())) {
     throw new Error(`Zhihu editor body not found. ${await collectEditorDiagnostics(page)}`);
   }
@@ -309,76 +343,19 @@ async function fillMarkdownWithImages(
   await editor.click({ timeout: 10_000 });
   await page.keyboard.press(`${process.platform === 'darwin' ? 'Meta' : 'Control'}+A`);
   await page.keyboard.press('Backspace');
+  await uploadImageIntoEditor(page, absolutePath);
+  await page.waitForTimeout(500);
 
-  const imageTokenMap = new Map<string, string>();
-  for (const [originalUrl, absolutePath] of imageEntries) {
-    imageTokenMap.set(originalUrl, absolutePath);
+  const html = await page.evaluate((selector) => {
+    const editor = document.querySelector(selector) as HTMLElement | null;
+    return editor?.innerHTML ?? '';
+  }, ZHIHU_MAIN_EDITOR_SELECTOR);
+
+  if (!html.includes('<figure')) {
+    throw new Error('Zhihu image upload did not produce a figure block');
   }
 
-  const blocks = splitMarkdownIntoBlocks(markdown);
-  const uploadedImages: string[] = [];
-  const failedImages: string[] = [];
-  const warnings: Array<{ code: string; message: string }> = [];
-
-  for (const block of blocks) {
-    if (block.type === 'text') {
-      if (block.value) {
-        const html = await renderMarkdownToHtml(block.value);
-        await insertHtmlIntoEditor(page, html);
-      }
-      continue;
-    }
-
-    const absolutePath = imageTokenMap.get(block.originalUrl);
-    if (!absolutePath) {
-      failedImages.push(block.originalUrl);
-      warnings.push({
-        code: 'PLATFORM_IMAGE_UPLOAD_UNAVAILABLE',
-        message: `${block.originalUrl}: current platform sync will keep text draft first and mark this image for manual completion`
-      });
-      await page.keyboard.insertText(`[图片待补充：${block.originalUrl}]`);
-      continue;
-    }
-
-    try {
-      await uploadImageIntoEditor(page, absolutePath);
-      uploadedImages.push(block.originalUrl);
-    } catch (error) {
-      failedImages.push(block.originalUrl);
-      warnings.push({
-        code: 'LOCAL_IMAGE_UPLOAD_FAILED',
-        message: `${block.originalUrl}: ${toErrorMessage(error)}`
-      });
-      await page.keyboard.insertText(`[图片待补充：${block.originalUrl}]`);
-    }
-  }
-
-  await page.waitForTimeout(1_500);
-
-  if (failedImages.length > 0) {
-    warnings.push({
-      code: 'IMAGE_DEGRADED_TO_TEXT',
-      message: `图片未完全同步，已保留原文占位并记录失败清单：${failedImages.join(', ')}`
-    });
-  }
-
-  return {
-    uploadedImages,
-    failedImages,
-    warnings
-  };
-}
-
-async function insertHtmlIntoEditor(page: Page, html: string): Promise<void> {
-  await page.evaluate((value) => {
-    const editor = document.querySelector('[contenteditable="true"]') as HTMLElement | null;
-    if (!editor) {
-      throw new Error('Zhihu editor body not found');
-    }
-
-    editor.focus();
-    document.execCommand('insertHTML', false, value);
-  }, html);
+  return html;
 }
 
 async function uploadImageIntoEditor(page: Page, absolutePath: string): Promise<void> {
@@ -405,14 +382,64 @@ async function uploadImageIntoEditor(page: Page, absolutePath: string): Promise<
     beforeCount,
     { timeout: 60_000 }
   );
-
-  await page.keyboard.press('ArrowRight').catch(() => undefined);
-  await page.keyboard.press('Enter').catch(() => undefined);
 }
 
-type MarkdownBlock =
-  | { type: 'text'; value: string }
-  | { type: 'image'; originalUrl: string };
+async function saveDraftViaApi(
+  page: Page,
+  title: string,
+  html: string
+): Promise<{ draftId: string; draftUrl: string }> {
+  const created = await page.evaluate(async (draftTitle) => {
+    const response = await fetch('https://zhuanlan.zhihu.com/api/articles/drafts', {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({
+        title: draftTitle,
+        delta_time: 0,
+        can_reward: false
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Zhihu draft create failed with ${response.status}`);
+    }
+
+    return response.json() as Promise<{ id?: string }>;
+  }, title);
+
+  const draftId = created.id;
+  if (!draftId) {
+    throw new Error(`Zhihu draft create returned no id: ${JSON.stringify(created)}`);
+  }
+
+  await page.evaluate(async ({ id, content }) => {
+    const response = await fetch(`https://zhuanlan.zhihu.com/api/articles/${id}/draft`, {
+      method: 'PATCH',
+      credentials: 'include',
+      headers: {
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({
+        content,
+        table_of_contents: false,
+        delta_time: 1,
+        can_reward: false
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error(`Zhihu draft patch failed with ${response.status}`);
+    }
+  }, { id: draftId, content: html });
+
+  return {
+    draftId,
+    draftUrl: `https://zhuanlan.zhihu.com/p/${draftId}/edit`
+  };
+}
 
 function splitMarkdownIntoBlocks(markdown: string): MarkdownBlock[] {
   const blocks: MarkdownBlock[] = [];
@@ -442,17 +469,6 @@ function splitMarkdownIntoBlocks(markdown: string): MarkdownBlock[] {
   return blocks;
 }
 
-async function waitForDraftReady(page: Page): Promise<{ draftId: string; draftUrl: string }> {
-  await page.waitForTimeout(4000);
-  const draftUrl = page.url();
-  const draftId = draftUrl.match(/\/p\/(\d+)/)?.[1] ?? draftUrl.match(/draft\/(\d+)/)?.[1] ?? draftUrl.match(/article\/(\d+)/)?.[1];
-
-  return {
-    draftId: draftId ?? 'zhihu-draft-pending',
-    draftUrl
-  };
-}
-
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
@@ -463,6 +479,15 @@ function toErrorMessage(error: unknown): string {
 
 function logZhihu(message: string): void {
   console.log(`[DraftFlow][Zhihu] ${message}`);
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 async function waitForEditorReady(page: Page, timeoutMs: number): Promise<boolean> {
@@ -494,17 +519,17 @@ async function waitForEditorReady(page: Page, timeoutMs: number): Promise<boolea
 }
 
 async function hasArticleEditorDom(page: Page): Promise<boolean> {
-  return page.evaluate(() => {
+  return page.evaluate((selector) => {
     const hasTitle = Boolean(
       document.querySelector('textarea[placeholder="请输入标题（最多 100 个字）"]')
       || document.querySelector('textarea[placeholder="标题"]')
       || document.querySelector('input[placeholder*="标题"]')
       || document.querySelector('textarea[placeholder*="标题"]')
     );
-    const hasBody = Boolean(document.querySelector('[contenteditable="true"]'));
+    const hasBody = Boolean(document.querySelector(selector));
 
     return hasTitle && hasBody;
-  });
+  }, ZHIHU_MAIN_EDITOR_SELECTOR);
 }
 
 async function collectEditorDiagnostics(page: Page): Promise<string> {
@@ -521,6 +546,7 @@ async function collectEditorDiagnostics(page: Page): Promise<string> {
       .slice(0, 12)
       .map((node) => ({
         tag: node.tagName.toLowerCase(),
+        className: node.getAttribute('class') ?? '',
         placeholder: node.getAttribute('placeholder') ?? '',
         dataPlaceholder: node.getAttribute('data-placeholder') ?? '',
         ariaLabel: node.getAttribute('aria-label') ?? '',
