@@ -1,0 +1,156 @@
+:root {
+  color-scheme: light;
+  font-family: "IBM Plex Sans", "PingFang SC", sans-serif;
+  background: linear-gradient(180deg, #f7f2e8 0%, #efe7d8 100%);
+  color: #1f1a17;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.app-shell {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 40px 24px 80px;
+}
+
+.hero {
+  margin-bottom: 24px;
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 12px;
+  color: #8a5a2b;
+}
+
+.hero h1 {
+  margin: 8px 0;
+  font-size: 48px;
+  line-height: 1;
+}
+
+.subtitle {
+  max-width: 680px;
+  font-size: 18px;
+  color: #57483c;
+}
+
+.panel {
+  margin-top: 20px;
+  padding: 20px;
+  border-radius: 20px;
+  background: rgba(255, 250, 242, 0.84);
+  box-shadow: 0 18px 50px rgba(68, 47, 25, 0.08);
+}
+
+.field {
+  display: block;
+  margin-bottom: 16px;
+}
+
+.field span {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.row {
+  display: flex;
+  gap: 12px;
+}
+
+input,
+select,
+button,
+pre {
+  font: inherit;
+}
+
+input,
+select {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid #d7c8b6;
+  background: #fffdf9;
+}
+
+button {
+  border: none;
+  border-radius: 12px;
+  padding: 12px 16px;
+  background: #d28b31;
+  color: #fffaf2;
+  cursor: pointer;
+}
+
+button.primary {
+  min-width: 180px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+pre {
+  margin: 0;
+  padding: 16px;
+  border-radius: 14px;
+  overflow: auto;
+  background: #1f1a17;
+  color: #f6ebdc;
+}
+
+.empty {
+  color: #7a6858;
+}
+
+.history-view {
+  display: grid;
+  gap: 12px;
+}
+
+.history-card {
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: #fffdf9;
+  border: 1px solid #eadbc8;
+}
+
+.history-meta,
+.history-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.history-title {
+  margin-top: 8px;
+  font-weight: 700;
+}
+
+.history-path {
+  margin-top: 6px;
+  color: #7a6858;
+  font-size: 14px;
+  word-break: break-all;
+}
+
+.history-summary {
+  margin-top: 8px;
+  color: #5f5146;
+  font-size: 14px;
+}
+
+.retry-button {
+  background: #8a5a2b;
+}

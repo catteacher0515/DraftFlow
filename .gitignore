@@ -1,0 +1,9 @@
+node_modules
+dist
+dist-electron
+out
+coverage
+playwright-report
+test-results
+.DS_Store
+.draftflow-data
