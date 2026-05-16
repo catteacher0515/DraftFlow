@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 
 import { chromium, type BrowserContext, type Page } from 'playwright';
 
+import { renderMarkdownToHtml } from '../markdown/html-renderer';
 import { createSessionStore } from '../session-store';
 
 export interface ZhihuAdapter {
@@ -276,7 +277,8 @@ async function fillMarkdown(page: Page, markdown: string): Promise<void> {
   await editor.click({ timeout: 10_000 });
   await page.keyboard.press(`${process.platform === 'darwin' ? 'Meta' : 'Control'}+A`);
   await page.keyboard.press('Backspace');
-  await page.keyboard.insertText(markdown);
+  const html = await renderMarkdownToHtml(markdown);
+  await insertHtmlIntoEditor(page, html);
   await page.waitForTimeout(1_500);
 }
 
@@ -321,7 +323,8 @@ async function fillMarkdownWithImages(
   for (const block of blocks) {
     if (block.type === 'text') {
       if (block.value) {
-        await page.keyboard.insertText(block.value);
+        const html = await renderMarkdownToHtml(block.value);
+        await insertHtmlIntoEditor(page, html);
       }
       continue;
     }
@@ -364,6 +367,18 @@ async function fillMarkdownWithImages(
     failedImages,
     warnings
   };
+}
+
+async function insertHtmlIntoEditor(page: Page, html: string): Promise<void> {
+  await page.evaluate((value) => {
+    const editor = document.querySelector('[contenteditable="true"]') as HTMLElement | null;
+    if (!editor) {
+      throw new Error('Zhihu editor body not found');
+    }
+
+    editor.focus();
+    document.execCommand('insertHTML', false, value);
+  }, html);
 }
 
 async function uploadImageIntoEditor(page: Page, absolutePath: string): Promise<void> {
