@@ -46,6 +46,16 @@ interface ObsidianAppConfig {
   attachmentFolderPath?: string;
 }
 
+const COMMON_OBSIDIAN_ATTACHMENT_FOLDERS = [
+  'attachments',
+  'attachment',
+  'assets',
+  'asset',
+  'images',
+  'image',
+  '图片'
+];
+
 function buildLocalImageCandidates(input: LocalImageCandidateInput): string[] {
   const candidates = new Set<string>();
   const fileName = path.basename(input.originalUrl);
@@ -65,6 +75,12 @@ function buildLocalImageCandidates(input: LocalImageCandidateInput): string[] {
     } else if (input.vaultRoot) {
       candidates.add(path.resolve(input.vaultRoot, folder, fileName));
       candidates.add(path.resolve(input.vaultRoot, folder, input.originalUrl));
+    }
+  }
+
+  if (input.vaultRoot) {
+    for (const folder of COMMON_OBSIDIAN_ATTACHMENT_FOLDERS) {
+      candidates.add(path.resolve(input.vaultRoot, folder, fileName));
     }
   }
 

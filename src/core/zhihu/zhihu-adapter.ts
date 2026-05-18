@@ -357,14 +357,7 @@ async function uploadImageAndGetHtml(page: Page, absolutePath: string): Promise<
     throw new Error('Zhihu image upload did not produce a figure block');
   }
 
-  const srcMatch = html.match(/<img[^>]+src="([^"]+)"/i);
-  const originalSrcMatch = html.match(/data-original-src="([^"]+)"/i);
-  const imageSrc = originalSrcMatch?.[1] ?? srcMatch?.[1];
-  if (!imageSrc) {
-    throw new Error('Zhihu image upload produced no image src');
-  }
-
-  return `<p><img src="${escapeHtmlAttribute(imageSrc)}" alt=""></p>`;
+  return extractUploadedZhihuImageHtml(html);
 }
 
 async function uploadImageIntoEditor(page: Page, absolutePath: string): Promise<void> {
@@ -499,14 +492,6 @@ function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
-function escapeHtmlAttribute(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-}
-
 export function cleanupZhihuHtml(html: string): string {
   return html
     .replace(/<figcaption[^>]*>添加图片注释，不超过 140 字（可选）<\/figcaption>/g, '')
@@ -517,6 +502,16 @@ export function cleanupZhihuHtml(html: string): string {
     .replace(/(?<=<\/p>)\s*(?=<figure>)/g, '')
     .replace(/<\/figure><figure/g, '</figure><p><br></p><figure')
     .trim();
+}
+
+export function extractUploadedZhihuImageHtml(html: string): string {
+  const normalized = cleanupZhihuHtml(html);
+  const figureMatch = normalized.match(/<figure\b[^>]*>[\s\S]*?<\/figure>/i);
+  if (!figureMatch) {
+    throw new Error('Zhihu image upload produced no normalized figure block');
+  }
+
+  return figureMatch[0];
 }
 
 async function waitForEditorReady(page: Page, timeoutMs: number): Promise<boolean> {

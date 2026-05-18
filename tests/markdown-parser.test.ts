@@ -86,4 +86,25 @@ describe('markdown parser', () => {
 
     await fs.rm(tempRoot, { recursive: true, force: true });
   });
+
+  it('resolves obsidian wiki images from a common vault attachment subfolder when app config is unset', async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'draftflow-obsidian-vault-'));
+    const vaultRoot = path.join(tempRoot, 'Vault');
+    const imageDir = path.join(vaultRoot, '图片');
+    await fs.mkdir(path.join(vaultRoot, '.obsidian'), { recursive: true });
+    await fs.mkdir(imageDir, { recursive: true });
+    await fs.writeFile(path.join(vaultRoot, '.obsidian', 'app.json'), '{}', 'utf8');
+    await fs.writeFile(path.join(imageDir, 'Pasted image 20260516101305.png'), 'png', 'utf8');
+
+    const notePath = path.join(vaultRoot, 'DraftFlow Zhihu 格式回归测试.md');
+    await fs.writeFile(notePath, '1. 标题\n\n![[Pasted image 20260516101305.png]]\n', 'utf8');
+
+    const doc = await parseMarkdownDocument(notePath);
+    const assets = await resolveImageAssets(doc);
+
+    expect(assets[0].absolutePath).toBe(path.join(imageDir, 'Pasted image 20260516101305.png'));
+    expect(assets[0].exists).toBe(true);
+
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  });
 });
