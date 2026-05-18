@@ -69,6 +69,11 @@ function normalizeZhihuHtml(html: string): string {
           rows.push(section);
         }
       }
+      for (const row of rows) {
+        row.children = (row.children ?? []).filter(
+          (child): child is Element => isElementNode(child) && (child.tagName === 'th' || child.tagName === 'td')
+        );
+      }
       node.properties = {
         'dataDraftNode': 'block',
         'dataDraftType': 'table',
