@@ -21,6 +21,12 @@ export async function resolveImageAssets(doc: ParsedMarkdownDocument): Promise<R
     });
     const resolvedPath = await findFirstExistingPath(candidates);
 
+    if (!resolvedPath) {
+      console.log(
+        `[DraftFlow][AssetResolver] NOT FOUND: image=${image.originalUrl} | baseDir=${baseDir} | vaultRoot=${vaultRoot ?? 'null'} | attachmentFolder=${attachmentFolderPath ?? 'null'} | candidates=${JSON.stringify(candidates)}`
+      );
+    }
+
     return {
       ...image,
       absolutePath: resolvedPath ?? candidates[0],

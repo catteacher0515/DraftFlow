@@ -28,14 +28,16 @@ describe('html renderer', () => {
     expect(html).toContain('<em>斜体</em>');
     expect(html).toContain('<blockquote class="blockquote">');
     expect(html).toContain('<p>• 列表一<br>• 列表二</p>');
-    expect(html).toContain('<p><strong>TypeScript</strong></p>');
-    expect(html).toContain('<pre><code>const a = 1;</code></pre>');
-    expect(html).toContain('<pre><code>+---+---+');
-    expect(html).toContain('| A | B |');
-    expect(html).toContain('| 1 | 2 |');
+    expect(html).toContain('<pre lang="typescript"><code class="language-typescript">const a = 1;</code></pre>');
+    expect(html).toContain('<table data-draft-node="block" data-draft-type="table" data-size="normal">');
+    expect(html).toContain('<tbody><tr>');
+    expect(html).toContain('<th>A</th>');
+    expect(html).toContain('<th>B</th>');
+    expect(html).toContain('<td>1</td>');
+    expect(html).toContain('<td>2</td>');
   });
 
-  it('normalizes compact lists and divider output for zhihu html', async () => {
+  it('normalizes compact lists and preserves native dividers for zhihu html', async () => {
     const html = await renderMarkdownToHtml([
       '1. 第一步',
       '2. 第二步',
@@ -48,11 +50,9 @@ describe('html renderer', () => {
 
     expect(html).toContain('<p>1. 第一步<br>2. 第二步</p>');
     expect(html).toContain('<p>[x] 已完成事项<br>[ ] 未完成事项</p>');
-    expect(html).toContain('<p>──────────</p>');
+    expect(html).toContain('<hr>');
     expect(html).not.toContain('<input');
-    expect(html).not.toContain('<hr');
     expect(html).not.toContain('<ul');
     expect(html).not.toContain('<ol');
-    expect(html).not.toContain('<table');
   });
 });

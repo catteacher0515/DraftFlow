@@ -8,25 +8,14 @@ import { visit } from 'unist-util-visit';
 import type { Element, ElementContent, Root, RootContent, Text } from 'hast';
 
 export async function renderMarkdownToHtml(markdown: string): Promise<string> {
-  const normalizedMarkdown = normalizeMarkdownForZhihu(markdown);
   const file = await unified()
     .use(remarkParse)
     .use(remarkGfm)
     .use(remarkRehype)
     .use(rehypeStringify)
-    .process(normalizedMarkdown);
+    .process(markdown);
 
   return normalizeZhihuHtml(String(file));
-}
-
-function normalizeMarkdownForZhihu(markdown: string): string {
-  return markdown
-    .replace(/^---$/gm, '──────────')
-    .replace(/```([^\n]*)\n([\s\S]*?)```/g, (_match, rawLanguage, rawCode) => {
-      const language = normalizeCodeLanguage(String(rawLanguage ?? '').trim()).label;
-      const code = String(rawCode ?? '').replace(/\n$/, '');
-      return [`**${language}**`, '', '```', code, '```'].join('\n');
-    });
 }
 
 function normalizeZhihuHtml(html: string): string {
@@ -39,19 +28,20 @@ function normalizeZhihuHtml(html: string): string {
       return;
     }
 
-    if (node.tagName === 'hr') {
-      node.tagName = 'p';
-      node.children = [{ type: 'text', value: '──────────' }];
-      return;
-    }
-
     if (node.tagName === 'pre') {
-      node.properties = {};
+      const codeChild = node.children?.find((child): child is Element => isElementNode(child) && child.tagName === 'code');
+      const className = codeChild?.properties?.className;
+      const rawLanguage = Array.isArray(className)
+        ? String(className.find((item) => String(item).startsWith('language-')) ?? '').replace('language-', '')
+        : '';
+      const language = normalizeCodeLanguage(rawLanguage);
       const codeText = extractNodeText(node).replace(/\n+$/, '');
+
+      node.properties = { lang: language.slug };
       node.children = [{
         type: 'element',
         tagName: 'code',
-        properties: {},
+        properties: { className: [`language-${language.slug}`] },
         children: [createTextNode(codeText)]
       }];
       return;
@@ -66,14 +56,29 @@ function normalizeZhihuHtml(html: string): string {
     }
 
     if (node.tagName === 'table') {
-      const asciiTable = buildAsciiTable(node);
-      node.tagName = 'pre';
-      node.properties = {};
+      const rows: Element[] = [];
+      for (const section of node.children ?? []) {
+        if (!isElementNode(section)) continue;
+        if (section.tagName === 'thead' || section.tagName === 'tbody') {
+          for (const row of section.children ?? []) {
+            if (isElementNode(row) && row.tagName === 'tr') {
+              rows.push(row);
+            }
+          }
+        } else if (section.tagName === 'tr') {
+          rows.push(section);
+        }
+      }
+      node.properties = {
+        'dataDraftNode': 'block',
+        'dataDraftType': 'table',
+        'dataSize': 'normal'
+      };
       node.children = [{
         type: 'element',
-        tagName: 'code',
+        tagName: 'tbody',
         properties: {},
-        children: [createTextNode(asciiTable)]
+        children: rows
       }];
       return;
     }
@@ -148,71 +153,6 @@ function buildListParagraphChildren(
   });
 
   return children.length > 0 ? children : [createTextNode('')];
-}
-
-function buildAsciiTable(tableNode: Element): string {
-  const rows = extractTableRows(tableNode);
-  if (rows.length === 0) {
-    return '';
-  }
-
-  const columnCount = Math.max(...rows.map((row) => row.cells.length));
-  const normalizedRows = rows.map((row) => ({
-    ...row,
-    cells: [...row.cells, ...Array.from({ length: Math.max(0, columnCount - row.cells.length) }, () => '')]
-  }));
-  const widths = Array.from({ length: columnCount }, (_, index) => {
-    return Math.max(...normalizedRows.map((row) => stringWidth(row.cells[index] ?? '')));
-  });
-
-  const separator = `+-${widths.map((width) => '-'.repeat(width)).join('-+-')}-+`;
-  const lines: string[] = [];
-
-  normalizedRows.forEach((row, index) => {
-    if (index === 0) {
-      lines.push(separator);
-    }
-    lines.push(`| ${row.cells.map((cell, cellIndex) => padCell(cell, widths[cellIndex])).join(' | ')} |`);
-    if (row.header || index === normalizedRows.length - 1) {
-      lines.push(separator);
-    }
-  });
-
-  return lines.join('\n');
-}
-
-function extractTableRows(tableNode: Element): Array<{ cells: string[]; header: boolean }> {
-  const rows: Array<{ cells: string[]; header: boolean }> = [];
-
-  for (const section of tableNode.children ?? []) {
-    if (!isElementNode(section)) {
-      continue;
-    }
-
-    const header = section.tagName === 'thead';
-    const sectionRows: Array<RootContent | ElementContent> = section.tagName === 'tr'
-      ? [section]
-      : Array.isArray(section.children)
-        ? section.children
-        : [];
-
-    for (const row of sectionRows) {
-      if (!isElementNode(row) || row.tagName !== 'tr') {
-        continue;
-      }
-
-      const cells = (row.children ?? [])
-        .filter((cell): cell is Element => isElementNode(cell) && (cell.tagName === 'th' || cell.tagName === 'td'))
-        .map((cell) => extractNodeText(cell).replace(/\s+/g, ' ').trim())
-        .filter(Boolean);
-
-      if (cells.length > 0) {
-        rows.push({ cells, header });
-      }
-    }
-  }
-
-  return rows;
 }
 
 function extractNodeText(node: RootContent | ElementContent): string {
@@ -299,13 +239,4 @@ function normalizeCodeLanguage(language: string): { slug: string; label: string 
     slug: normalized,
     label: normalized.charAt(0).toUpperCase() + normalized.slice(1)
   };
-}
-
-function stringWidth(value: string): number {
-  return Array.from(value).reduce((width, char) => width + (char.charCodeAt(0) > 255 ? 2 : 1), 0);
-}
-
-function padCell(value: string, targetWidth: number): string {
-  const padding = Math.max(0, targetWidth - stringWidth(value));
-  return value + ' '.repeat(padding);
 }
